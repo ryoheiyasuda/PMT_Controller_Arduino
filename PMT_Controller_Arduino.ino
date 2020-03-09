@@ -5,18 +5,33 @@
     ======================
     v_i%d = set voltage to %d (like v_i50)
     v_m = monitor voltage
-    pmt1 = turn on pmt
-    pmt0 = turn off pmt
-    pow1 = turn on everything (including Peltier)
-    pow0 = turn off everything (including Peltier)
-    aut1 = auto-recovery upon PMT error. (default off)
-    aut0 = turn off above feature.
+    pmtA1 = turn on pmt A (or B)
+    pmtA0 = turn off pmt A
+    powA1 = turn on Peltier A etc to make PMT A ready.
+    powA0 = turn off PMT A.
+    autA1 = auto-recovery upon PMT A error. (default off)
+    autA0 = turn off above feature.
 */
 
 #include <EEPROM.h>
 
-#define outputA 50 //rotary encoder 1st pin
-#define outputB 52 //rotary encoder 2nd pin 
+/*
+  #define outputA 50 //rotary encoder 1st pin
+  #define outputB 52 //rotary encoder 2nd pin
+  #define pelPowPin 4 //External connector pin number: 3
+  #define pelErrPin 5 //External connector pin number: 5
+  #define pmtPowPin 6 //External connector pin number: 7
+  #define pmtErrPin 7 //External connector pin number: 9
+  #define pmtOnPin 8 //External connector pin number: 11
+  #define vltOutputPin 10 //External connector pin number: 17
+  #define vMonitorInputPin A0 //External connector pin number: 15
+  #define fanPowPin 12 //External connector pin number: 19
+
+  #define vMonitorOutputPin 9 //Output for vMonitorInput.
+  #define ledPin 3 //Signal for PMT on/off and flickers during error
+  #define ledGNDPin 2
+*/
+
 #define pelPowPin 4 //External connector pin number: 3
 #define pelErrPin 5 //External connector pin number: 5
 #define pmtPowPin 6 //External connector pin number: 7
@@ -30,19 +45,23 @@
 #define ledPin 3 //Signal for PMT on/off and flickers during error 
 #define ledGNDPin 2
 
-const int counterAddress = 2; //stores counter in EEPROM
-const int counterMax = 50; //maximum voltage 0.9V is roughly 50 in 8-bit
+const short rotaryPinA[2] = {50, 51};  //rotary encoder 1st pin
+const short rotaryPinB[2] = {52, 53};
+const short nPMT = 2;
+const short counterAddress[2] = {2, 4}; //stores counter in EEPROM
+const short counterMax = 50; //maximum voltage 0.9V is roughly 50 in 8-bit
+
 
 //Rotary encoder
-int counter = 0;
-int aState;
-int aLastState;
+short counter[2] = {0, 0};
+short aState[2] = {0, 0};
+short aLastState[2] = {0, 0};
 
 //PMT states
 bool pmt_err = false;
 bool pel_err = false;
 bool pmt_on = false;
-bool vlt_change = true;
+bool vlt_change[2] = {true, true};
 bool auto_pmt_recov = false; //Auto-recovery on off.
 
 double v_monitor = 0;
@@ -58,9 +77,10 @@ int iter = 50; //number of iteration for average voltage for arduino
 
 
 void setup() {
-  pinMode (outputA, INPUT);
-  pinMode (outputB, INPUT);
-
+  for (short i = 0; i < nPMT; i++) {
+    pinMode (rotaryPinA[i], INPUT);
+    pinMode (rotaryPinB[i], INPUT);
+  }
   pinMode (pelPowPin, OUTPUT);
   pinMode (pelErrPin, INPUT);
   pinMode (pmtPowPin, OUTPUT);
@@ -81,24 +101,29 @@ void setup() {
 
   Serial.begin (9600);
 
-  aLastState = digitalRead(outputA);
-
-  EEPROM.get(counterAddress, counter);
-  vltChange();
+  for (short i = 0; i < nPMT; i++)
+  {
+    aLastState[i] = digitalRead(rotaryPinA[i]);
+    EEPROM.get(counterAddress[i], counter[i]);
+    vltChange(i);
+  }
 }
 
 void rotaryEncoderProcess()
 {
-  aState = digitalRead(outputA);
-  if (aState != aLastState) {
-    if (digitalRead(outputB) != aState) {
-      counter ++;
-    } else {
-      counter --;
+  for (short i = 0; i < nPMT; i++)
+  {
+    aState[i] = digitalRead(rotaryPinA[i]);
+    if (aState[i] != aLastState[i]) {
+      if (digitalRead(rotaryPinB[i]) != aState[i]) {
+        counter[i] ++;
+      } else {
+        counter[i] --;
+      }
+      vlt_change[i] = true;
     }
-    vlt_change = true;
+    aLastState[i] = aState[i];
   }
-  aLastState = aState;
 }
 
 void pmtRead()
@@ -147,17 +172,22 @@ void pmtWrite()
   if (Serial.available()) {
     String s = Serial.readStringUntil('\n');
     String s3 = s.substring(0, 3);
+    char s4 = s[3];
+    short pmtID = 0;
+    if (s[3] == 'B')
+      pmtID = 1;
+
     if (s3.equals("v_i")) //input
     {
       if (s.length() == 3)
       {
-        Serial.println((double)counter / v_output_calib * vdd);
+        Serial.println((double)counter[pmtID] / v_output_calib * vdd);
       }
       else
       {
         int val = s.substring(3).toInt();
-        counter = val;
-        vlt_change = true;
+        counter[pmtID] = val;
+        vlt_change[pmtID] = true;
       }
     }
     else if (s3.equals("v_m"))//monitor
@@ -168,7 +198,7 @@ void pmtWrite()
     else if (s3.equals("pmt")) {
       int val = s.substring(3).toInt();
       if (val == 1) {
-        powerOnOff(true);
+        pmtOnOff(true);
       }
       else {
         pmtOnOff(false);
@@ -192,30 +222,36 @@ void pmtOnOff(bool ON)
 
 void powerOnOff(bool ON)
 {
+  if (!ON) {
+    pmtOnOff(false);
+  }
   digitalWrite (pelPowPin, ON);
-  digitalWrite (pmtPowPin, ON);
 }
 
-void vltChange() {
-  if (vlt_change)
+void vltChange(short pmtID) {
+  if (vlt_change[pmtID])
   {
-    if (counter < 0)
-      counter = 0;
-    else if (counter > counterMax)
-      counter = counterMax;
-    EEPROM.put(counterAddress, counter);
-    analogWrite(vltOutputPin, counter);
-    //Serial.println(counter);
+    if (counter[pmtID] < 0)
+      counter[pmtID] = 0;
+    else if (counter[pmtID] > counterMax)
+      counter[pmtID] = counterMax;
+    EEPROM.put(counterAddress[pmtID], counter[pmtID]);
+    analogWrite(vltOutputPin[pmtID], counter[pmtID]);
+    //Serial.print("PMT id = ");
+    //Serial.print(pmtID);
+    //Serial.print("counter = ,");
+    //Serial.println(counter[pmtID]);
   }
 }
 
 void loop()
 {
 
-  vlt_change = false;
+  for (short i = 0; i < nPMT; i++)
+    vlt_change[i] = false;
   rotaryEncoderProcess();
   pmtRead();
   pmtWrite();
-  vltChange();
-
+  for (short i = 0; i < nPMT; i++)
+    vltChange(i);
 }
