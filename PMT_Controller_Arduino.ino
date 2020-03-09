@@ -179,13 +179,13 @@ void pmtWrite()
 
     if (s3.equals("v_i")) //input
     {
-      if (s.length() == 3)
+      if (s.length() == 4)
       {
         Serial.println((double)counter[pmtID] / v_output_calib * vdd);
       }
       else
       {
-        int val = s.substring(3).toInt();
+        int val = s.substring(4).toInt();
         counter[pmtID] = val;
         vlt_change[pmtID] = true;
       }
@@ -196,7 +196,7 @@ void pmtWrite()
 
     }
     else if (s3.equals("pmt")) {
-      int val = s.substring(3).toInt();
+      int val = s.substring(4).toInt();
       if (val == 1) {
         pmtOnOff(true);
       }
@@ -205,11 +205,11 @@ void pmtWrite()
       }
     }
     else if (s3.equals("pow")) {
-      bool val = (bool)(s.substring(3).toInt());
+      bool val = (bool)(s.substring(4).toInt());
       powerOnOff(val);
     }
     else if (s3.equals("aut")) {
-      bool val = (bool)(s.substring(3).toInt());
+      bool val = (bool)(s.substring(4).toInt());
       auto_pmt_recov = val;
     }
   }
