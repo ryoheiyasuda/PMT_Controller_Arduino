@@ -106,7 +106,7 @@ void pmtRead()
   pel_err = digitalRead(pelErrPin);
   pmt_err = digitalRead(pmtErrPin);
   pmt_on = digitalRead(pmtOnPin);
-    
+
   if (pmt_err) {
     //Serial.println("pmt error");
     if (auto_pmt_recov)
@@ -168,29 +168,32 @@ void pmtWrite()
     else if (s3.equals("pmt")) {
       int val = s.substring(3).toInt();
       if (val == 1) {
-        digitalWrite (pelPowPin, HIGH);
-        digitalWrite (pmtPowPin, HIGH);
+        powerOnOff(true);
       }
       else {
-        digitalWrite (pmtPowPin, LOW);
+        pmtOnOff(false);
       }
     }
     else if (s3.equals("pow")) {
-      int val = s.substring(3).toInt();
-      if (val == 1) {
-        digitalWrite (pelPowPin, HIGH);
-        digitalWrite (pmtPowPin, HIGH);
-      }
-      else {
-        digitalWrite (pelPowPin, LOW);
-        digitalWrite (pmtPowPin, LOW);
-      }
+      bool val = (bool)(s.substring(3).toInt());
+      powerOnOff(val);
     }
     else if (s3.equals("aut")) {
       bool val = (bool)(s.substring(3).toInt());
       auto_pmt_recov = val;
     }
   }
+}
+
+void pmtOnOff(bool ON)
+{
+  digitalWrite (pmtPowPin, ON);
+}
+
+void powerOnOff(bool ON)
+{
+  digitalWrite (pelPowPin, ON);
+  digitalWrite (pmtPowPin, ON);
 }
 
 void vltChange() {
