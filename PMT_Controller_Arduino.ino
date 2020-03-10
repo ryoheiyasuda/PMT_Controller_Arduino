@@ -1,9 +1,9 @@
 /*
     COPYRIGHT nozomi yasuda
 
-    TODO: 
+    TODO:
     ====
-    Pin numbers are random, need to be adjusted 
+    Pin numbers are random, need to be adjusted
 
     Serial input commands:
     ======================
@@ -16,33 +16,69 @@
     autA1 = auto-recovery upon PMT A error. (default off)
     autA0 = turn off above feature.
 
+    defined(ARDUINO_AVR_MEGA) --- mega
+    defined(ARDUINO_SAM_DUE) --- due
+
+    defined(TEENSYDUINO) --- Teesy products
 */
 
+#if defined(ARDUINO_SAM_DUE)
+#include <DueFlashStorage.h>
+DueFlashStorage dueFlashStorage;
+#define use_flash 1
+#else
 #include <EEPROM.h>
+#define use_flash 0
+#endif
 
-const short nPMT = 2; //number of PMT's connected to arduino 
+const short nPMT = 2; //number of PMT's connected to arduino
 
-//Pins 
-const short pelPowPin[nPMT] = {3,5}; //External connector pin number: 3 
-const short pelErrPin[nPMT] = {6,7}; //External connector pin number: 5 
-const short pmtPowPin[nPMT] = {8,9}; //External connector pin number: 7  
-const short pmtErrPin[nPMT] = {10,11}; //External connector pin number: 9 
-const short pmtOnPin[nPMT] = {12,13}; //External connector pin number: 11
-const short vltOutputPin[nPMT] = {14,15}; //External connector pin number: 17 
-const short vMonitorInputPin[nPMT] = {A0, A1}; //External connector pin number: 15 
-const short fanPowPin[nPMT] = {18,19}; //External connector pin number: 19
-const short vMonitorOutputPin[nPMT] = {20,21}; //Output for vMonitorInput.
-const short ledPin[nPMT] = {22,23}; //Signal for PMT on/off and flickers during error 
-const short ledGNDPin[nPMT] = {24,25};   
+//Pins
+const short pelPowPin[nPMT] = {35, 28}; //External connector pin number: 3
+const short pelErrPin[nPMT] = {36, 29}; //External connector pin number: 5
+const short pmtPowPin[nPMT] = {37, 30}; //External connector pin number: 7
+const short pmtErrPin[nPMT] = {38, 31}; //External connector pin number: 9
+const short pmtOnPin[nPMT] = {39, 32}; //External connector pin number: 11
+const short vMonitorInputPin[nPMT] = {A0, A1}; //External connector pin number: 15 --- Analog input
 
-//Rotary encoder and counter
+#if defined(ARDUINO_SAM_DUE)
+const short vltOutputPin[nPMT] = {DAC0, DAC1}; //External connector pin number: 17 --- Analog output
+#else
+const short vltOutputPin[nPMT] = {2, 4}; //External connector pin number: 17 --- Analog output (use 2- 13)
+#endif
+const short fanPowPin[nPMT] = {40, 33}; //External connector pin number: 19
+
+//use for monitor panel.
+const short vMonitorOutputPin[nPMT] = {3, 5}; //Output for vMonitorInput. --- Analog output (use 2- 13)
+
+const short ledPin[nPMT] = {8, 9}; //Signal for PMT on/off and flickers during error use 2-13.
+const short ledGNDPin[nPMT] = {52, 53};
+
+//Rotary encoder pin
+const short rotaryPinA[nPMT] = {40, 41};
+const short rotaryPinB[nPMT] = {42, 43};
+
+
+//Voltage calibration
+const int v_input_calib = 1024; //10 bit input. Pretty noisy.
+const double vdd[nPMT] = {5.0, 5.0};
+
+#if defined(ARDUINO_SAM_DUE) or defined(TEENSYDUINO)
+const short n_bits = 10; //used only for Due.
+const int v_output_calib = 1024; //10 bit output
+#else
+const short n_bits = 8; //
+const int v_output_calib = 256; //8 bit output
+#endif
+
+//Rotaty encoder state values
 short counter[nPMT] = {0, 0};
 short rotaryCurrentState[nPMT] = {0, 0};
 short rotaryLastState[nPMT] = {0, 0};
-const short rotaryPinA[nPMT] = {50, 51};  
-const short rotaryPinB[nPMT] = {52, 53};
-const short counterAddress[nPMT] = {2, 4}; //stores counter in EEPROM
-const short counterMax = 50; //maximum voltage 0.9V is roughly 50 in 8-bit
+short counterMax = v_output_calib / 5; //maximum voltage ~1V
+
+//EEPROM / flash saving
+short counterAddress[nPMT] = {2, 4}; //stores counter in Flash
 
 //PMT states
 bool pmt_err[nPMT] = {false, false};
@@ -53,10 +89,7 @@ bool auto_pmt_recov[nPMT] = {false, false}; //Auto-recovery on off.
 
 //adjustments
 double v_monitor[nPMT] = {0, 0};
-double v_input_calib[nPMT] = {1024.0, 1024.0}; //10 bit input. Pretty noisy.
-double v_output_calib[nPMT] = {256.0, 256.0}; //8 bit output
-double vdd[nPMT] = {5.0, 5.0};
-int ledBrightness = 20; //of 255 
+int ledBrightness = v_output_calib * 0.2;
 
 //For averaging voltage input.
 double sum_vol[nPMT] = {0, 0};
@@ -82,14 +115,42 @@ void setup() {
     digitalWrite (pelPowPin[i], LOW);
     digitalWrite (fanPowPin[i], LOW);
     digitalWrite (ledGNDPin[i], LOW);
-   }
+  }
+
   Serial.begin (9600);
+
+#if n_bits > 8
+  analogWriteResolution(n_bits);
+  analogReadResolution(n_bits);
+#endif
+
   for (short i = 0; i < nPMT; i++)
   {
     rotaryLastState[i] = digitalRead(rotaryPinA[i]);
-    EEPROM.get(counterAddress[i], counter[i]);
+    readFlash(i);
     vltChange(i);
   }
+}
+
+void readFlash(short pmtID)
+{
+#if use_flash == 1
+  byte* b2 = dueFlashStorage.readAddress(counterAddress[pmtID]);
+  memcpy(b2, &(counter[pmtID]), 2);
+#else
+  EEPROM.get(counterAddress[pmtID], counter[pmtID]);
+#endif
+}
+
+void writeFlash(short pmtID)
+{
+#if use_flash == 1
+  byte b2[2];
+  memcpy(&(counter[pmtID]), b2, 2);
+  dueFlashStorage.write(counterAddress[pmtID], b2, 2);
+#else
+  EEPROM.put(counterAddress[pmtID], counter[pmtID]);
+#endif
 }
 
 void rotaryEncoderProcess()
@@ -116,14 +177,21 @@ void pmtRead()
     pel_err[i] = digitalRead(pelErrPin[i]);
     pmt_err[i] = digitalRead(pmtErrPin[i]);
     pmt_on[i] = digitalRead(pmtOnPin[i]);
-  
-    if (pmt_err[i]) {
+
+    if (pmt_err[i] || pel_err[i]) {
       //Serial.println("pmt error");
+
+      vlt_change[i] = true;
+
       if (auto_pmt_recov[i])
       {
-        digitalWrite (pmtPowPin[i], LOW);
-        delay(100);
-        digitalWrite (pmtPowPin[i], HIGH);
+        pmtOnOff(false, i);
+        delay(50);
+        powOnOff(false, i);
+        delay(50);
+        powOnOff(true, i);
+        delay(50);
+        pmtOnOff(true, i);
       }
       else
       {
@@ -141,16 +209,20 @@ void pmtRead()
     }
 
 
-  sum_count[i] ++;
-  sum_vol[i] += (double)analogRead(vMonitorInputPin[i]);
-  if (sum_count[i] == iter)
-  {
-    v_monitor[i] = sum_vol[i] * vdd[i] / v_input_calib[i] / iter;
-    sum_vol[i] = 0;
-    sum_count[i] = 0;
-    analogWrite (vMonitorOutputPin[i], v_monitor[i] * v_output_calib[i] / vdd[i]);
-  }
-  delay(1);
+    sum_count[i] ++;
+    sum_vol[i] += (double)analogRead(vMonitorInputPin[i]);
+    if (sum_count[i] == iter)
+    {
+      v_monitor[i] = sum_vol[i] * vdd[i] / (double)v_input_calib / (double)iter;
+      sum_vol[i] = 0;
+      sum_count[i] = 0;
+      if (pmt_err[i])  {
+        analogWrite (vMonitorOutputPin[i], 0);
+      }
+      else
+        analogWrite (vMonitorOutputPin[i], v_monitor[i] * v_output_calib / vdd[i]);
+    }
+    delay(1);
   }
 }
 
@@ -168,7 +240,7 @@ void pmtWrite()
     {
       if (s.length() == 4)
       {
-        Serial.println((double)counter[pmtID] / v_output_calib[pmtID] * vdd[pmtID]);
+        Serial.println((double)counter[pmtID] / v_output_calib * vdd[pmtID]);
       }
       else
       {
@@ -183,17 +255,12 @@ void pmtWrite()
 
     }
     else if (s3.equals("pmt")) {
-      int val = s.substring(4).toInt();
-      if (val == 1) {
-        pmtOnOff(true, pmtID);
-      }
-      else {
-        pmtOnOff(false, pmtID);
-      }
+      bool val = (bool)(s.substring(4).toInt());
+      pmtOnOff(val, pmtID);
     }
     else if (s3.equals("pow")) {
       bool val = (bool)(s.substring(4).toInt());
-      powerOnOff(val, pmtID);
+      powOnOff(val, pmtID);
     }
     else if (s3.equals("aut")) {
       bool val = (bool)(s.substring(4).toInt());
@@ -207,7 +274,7 @@ void pmtOnOff(bool ON, short pmtID)
   digitalWrite (pmtPowPin[pmtID], ON);
 }
 
-void powerOnOff(bool ON, short pmtID)
+void powOnOff(bool ON, short pmtID)
 {
   if (!ON) {
     pmtOnOff(false, pmtID);
@@ -222,8 +289,14 @@ void vltChange(short pmtID) {
       counter[pmtID] = 0;
     else if (counter[pmtID] > counterMax)
       counter[pmtID] = counterMax;
-    EEPROM.put(counterAddress[pmtID], counter[pmtID]);
-    analogWrite(vltOutputPin[pmtID], counter[pmtID]);
+      
+    writeFlash(pmtID);
+
+    if (pmt_err)
+      analogWrite(vltOutputPin[pmtID], 0);
+    else
+      analogWrite(vltOutputPin[pmtID], counter[pmtID]);
+      
     //Serial.print("PMT id = ");
     //Serial.print(pmtID);
     //Serial.print("counter = ,");
