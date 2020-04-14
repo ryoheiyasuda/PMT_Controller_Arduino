@@ -23,12 +23,12 @@
 */
 
 #if defined(ARDUINO_SAM_DUE)
-#include <DueFlashStorage.h>
-DueFlashStorage dueFlashStorage;
-#define use_flash 1
+  #include <DueFlashStorage.h>
+  DueFlashStorage dueFlashStorage;
+  #define use_flash 1
 #else
-#include <EEPROM.h>
-#define use_flash 0
+  #include <EEPROM.h>
+  #define use_flash 0
 #endif
 
 const short nPMT = 2; //number of PMT's connected to arduino
@@ -52,7 +52,6 @@ const short fanPowPin[nPMT] = {40, 33}; //External connector pin number: 19
 const short vMonitorOutputPin[nPMT] = {3, 5}; //Output for vMonitorInput. --- Analog output (use 2- 13)
 
 const short ledPin[nPMT] = {8, 9}; //Signal for PMT on/off and flickers during error use 2-13.
-const short ledGNDPin[nPMT] = {52, 53};
 
 //Rotary encoder pin
 const short rotaryPinA[nPMT] = {40, 41};
@@ -110,14 +109,12 @@ void setup() {
     pinMode (vMonitorInputPin[i], INPUT);
     pinMode (fanPowPin[i], OUTPUT);
     pinMode (ledPin[i], OUTPUT);
-    pinMode (ledGNDPin[i], OUTPUT);
     digitalWrite (pmtPowPin[i], LOW);
     digitalWrite (pelPowPin[i], LOW);
     digitalWrite (fanPowPin[i], LOW);
-    digitalWrite (ledGNDPin[i], LOW);
   }
 
-  Serial.begin (9600);
+  Serial.begin (115200);
 
 #if n_bits > 8
   analogWriteResolution(n_bits);
@@ -130,6 +127,8 @@ void setup() {
     readFlash(i);
     vltChange(i);
   }
+
+  Serial.print("Initialized\r");
 }
 
 void readFlash(short pmtID)
@@ -179,7 +178,7 @@ void pmtRead()
     pmt_on[i] = digitalRead(pmtOnPin[i]);
 
     if (pmt_err[i] || pel_err[i]) {
-      //Serial.println("pmt error");
+      //Serial.print("pmt error\r");
 
       vlt_change[i] = true;
 
@@ -240,7 +239,8 @@ void pmtWrite()
     {
       if (s.length() == 4)
       {
-        Serial.println((double)counter[pmtID] / v_output_calib * vdd[pmtID]);
+        Serial.print((double)counter[pmtID] / v_output_calib * vdd[pmtID]);
+        Serial.print("\r");
       }
       else
       {
@@ -251,8 +251,8 @@ void pmtWrite()
     }
     else if (s3.equals("v_m"))//monitor
     {
-      Serial.println(v_monitor[pmtID]);
-
+      Serial.print(v_monitor[pmtID]);
+      Serial.print("\r");
     }
     else if (s3.equals("pmt")) {
       bool val = (bool)(s.substring(4).toInt());
@@ -300,7 +300,8 @@ void vltChange(short pmtID) {
     //Serial.print("PMT id = ");
     //Serial.print(pmtID);
     //Serial.print("counter = ,");
-    //Serial.println(counter[pmtID]);
+    //Serial.print(counter[pmtID]);
+    //Serial.print("\r");
   }
 }
 
